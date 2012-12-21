@@ -485,6 +485,35 @@ chimp_symtable_visit_stmt_pattern_test (ChimpRef *self, ChimpRef *test)
 
                 break;
             }
+        case CHIMP_AST_EXPR_ARRAY:
+            {
+                ChimpRef *array = CHIMP_AST_EXPR(test)->array.value;
+                size_t i;
+                for (i = 0; i < CHIMP_ARRAY_SIZE(array); i++) {
+                    ChimpRef *item = CHIMP_ARRAY_ITEM(array, i);
+                    if (!chimp_symtable_visit_stmt_pattern_test (self, item)) {
+                        return CHIMP_FALSE;
+                    }
+                }
+
+                break;
+            }
+        case CHIMP_AST_EXPR_HASH:
+            {
+                ChimpRef *hash = CHIMP_AST_EXPR(test)->hash.value;
+                size_t i;
+                /* XXX hashes are encoded as arrays in the AST */
+                for (i = 0; i < CHIMP_ARRAY_SIZE(hash); i += 2) {
+                    ChimpRef *key = CHIMP_ARRAY(hash)->items[i];
+                    ChimpRef *value = CHIMP_ARRAY(hash)->items[i+1];
+                    if (!chimp_symtable_visit_stmt_pattern_test (self, key)) {
+                        return CHIMP_FALSE;
+                    }
+                    if (!chimp_symtable_visit_stmt_pattern_test (self, value)) {
+                        return CHIMP_FALSE;
+                    }
+                }
+            }
         default:
             break;
     };

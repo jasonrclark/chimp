@@ -284,6 +284,7 @@ chimp_vm_cmp (ChimpVM *vm)
         chimp_bug (__FILE__, __LINE__, "NULL value on the stack");
         return CHIMP_FALSE;
     }
+
     actual = chimp_object_cmp (left, right);
     if (actual == CHIMP_CMP_ERROR) {
         chimp_bug (__FILE__, __LINE__, "TODO raise an exception");
@@ -359,6 +360,38 @@ chimp_vm_eval_frame (ChimpVM *vm, ChimpRef *frame)
                     chimp_bug (__FILE__, __LINE__, "GETATTR instruction failed");
                     return NULL;
                 }
+                pc++;
+                break;
+            }
+            case CHIMP_OPCODE_GETITEM:
+            {
+                ChimpRef *result;
+                ChimpRef *key;
+                ChimpRef *target;
+                
+                key = chimp_vm_pop (vm);
+                if (key == NULL) {
+                    chimp_bug (__FILE__, __LINE__, "GETITEM instruction failed 1");
+                    return NULL;
+                }
+
+                target = chimp_vm_pop (vm);
+                if (target == NULL) {
+                    chimp_bug (__FILE__, __LINE__, "GETITEM instruction failed 2");
+                    return NULL;
+                }
+
+                result = chimp_object_getitem (target, key);
+                if (result == NULL) {
+                    chimp_bug (__FILE__, __LINE__, "GETITEM instruction failed 3");
+                    return NULL;
+                }
+
+                if (!chimp_vm_push (vm, result)) {
+                    chimp_bug (__FILE__, __LINE__, "GETITEM instruction failed 4");
+                    return NULL;
+                }
+
                 pc++;
                 break;
             }
