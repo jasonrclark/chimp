@@ -1,0 +1,23 @@
+use io;
+
+main argv {
+  var task = spawn { 
+
+    # Wish we could rely on self keyword, but instead pass it in from external scope
+    var self = receive;
+    self.send("From inside the house!");
+
+    var child = spawn {
+      var parent = receive;
+      parent.send("Wake-up call!");
+    };
+
+    child.send(self);
+    io.print(receive); # String from ourselves...
+    io.print(receive); # String from child...
+  };
+
+  task.send(task);
+  task.join();
+}
+
