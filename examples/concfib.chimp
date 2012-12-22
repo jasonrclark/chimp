@@ -1,7 +1,3 @@
-#
-# This example is currently broken.
-#
-
 use io;
 
 fib n {
@@ -11,15 +7,32 @@ fib n {
   ret n;
 }
 
+calculate_and_send_to_printer n {
+  var printer = receive;
+  #io.print(["Calculating", n]);
+  printer.send(fib(n));
+}
+
 main argv {
   io.print("Running fib(10), fib(20), fib(30) concurrently ...");
 
-  var f3 = spawn { |me| me.send(fib(30)); };
-  var f2 = spawn { |me| me.send(fib(20)); };
-  var f1 = spawn { |me| me.send(fib(10)); };
+  var f1 = spawn { calculate_and_send_to_printer(10); };
+  var f2 = spawn { calculate_and_send_to_printer(20); };
+  var f3 = spawn { calculate_and_send_to_printer(30); };
 
-  io.print(f1.recv());
-  io.print(f2.recv());
-  io.print(f3.recv());
+  var printer = spawn {
+    io.print(receive);
+    io.print(receive);
+    io.print(receive);
+  };
+
+  f1.send(printer);
+  f2.send(printer);
+  f3.send(printer);
+
+  f1.join();
+  f2.join();
+  f3.join();
+  printer.join();
 }
 
