@@ -393,6 +393,7 @@ chimp_core_startup (void *stack_start)
 
     chimp_task_add_module (NULL, chimp_init_io_module ());
     chimp_task_add_module (NULL, chimp_init_assert_module ());
+    chimp_task_add_module (NULL, chimp_init_unit_module ());
     chimp_task_add_module (NULL, chimp_init_os_module ());
     chimp_task_add_module (NULL, chimp_init_gc_module ());
     chimp_task_add_module (NULL, chimp_init_net_module ());
