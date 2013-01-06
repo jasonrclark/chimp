@@ -1299,9 +1299,9 @@ chimp_compile_ast_decl_use (ChimpCodeCompiler *c, ChimpRef *decl)
     ChimpRef *name;
 
     name = CHIMP_AST_DECL(decl)->use.name;
-    import = chimp_task_find_module (NULL, name);
+    import = chimp_module_load (name, chimp_module_path);
+
     if (import == NULL) {
-        /* TODO load new module from file */
         return CHIMP_FALSE;
     }
 

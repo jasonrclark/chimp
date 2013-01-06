@@ -16,12 +16,17 @@
  *                                                                           *
  *****************************************************************************/
 
+#include <sys/stat.h>
+
 #include "chimp/module.h"
 #include "chimp/array.h"
 #include "chimp/object.h"
 #include "chimp/str.h"
+#include "chimp/compile.h"
 
 ChimpRef *chimp_module_class = NULL;
+static ChimpRef *cache = NULL;
+static ChimpRef *builtin_modules = NULL;
 
 static ChimpRef *
 chimp_module_init (ChimpRef *self, ChimpRef *args)
@@ -73,6 +78,8 @@ chimp_module_str (ChimpRef *self)
 static void
 _chimp_module_mark (ChimpGC *gc, ChimpRef *self)
 {
+    CHIMP_SUPER(self)->mark (gc, self);
+
     chimp_gc_mark_ref (gc, CHIMP_MODULE(self)->name);
     chimp_gc_mark_ref (gc, CHIMP_MODULE(self)->locals);
 }
@@ -90,6 +97,72 @@ chimp_module_class_bootstrap (void)
     CHIMP_CLASS(chimp_module_class)->init = chimp_module_init;
     CHIMP_CLASS(chimp_module_class)->mark = _chimp_module_mark;
     return CHIMP_TRUE;
+}
+
+ChimpRef *
+chimp_module_load (ChimpRef *name, ChimpRef *path)
+{
+    size_t i;
+    int rc;
+    ChimpRef *mod;
+
+    /* TODO circular references ... */
+
+    if (cache == NULL) {
+        cache = chimp_hash_new ();
+        if (cache == NULL) {
+            return NULL;
+        }
+        chimp_gc_make_root (NULL, cache);
+    }
+    rc = chimp_hash_get (cache, name, &mod);
+    if (rc == 0) {
+        return mod;
+    }
+    else if (rc == -1) {
+        return NULL;
+    }
+
+    if (path != NULL) {
+        for (i = 0; i < CHIMP_ARRAY_SIZE(path); i++) {
+            ChimpRef *element = CHIMP_ARRAY_ITEM(path, i);
+            ChimpRef *filename = chimp_str_new_format (
+                "%s/%s.chimp", CHIMP_STR_DATA(element), CHIMP_STR_DATA(name));
+            struct stat st;
+
+            if (stat (CHIMP_STR_DATA(filename), &st) != 0) {
+                continue;
+            }
+
+            if (S_ISREG(st.st_mode)) {
+                mod = chimp_compile_file (name, CHIMP_STR_DATA(filename));
+                if (mod == NULL) {
+                    return NULL;
+                }
+                if (!chimp_hash_put (cache, name, mod)) {
+                    return NULL;
+                }
+                return mod;
+            }
+        }
+    }
+
+    rc = chimp_hash_get (builtin_modules, name, &mod);
+
+    if (rc == 0) {
+        if (!chimp_hash_put (cache, name, mod)) {
+            return NULL;
+        }
+        return mod;
+    }
+    else if (rc == 1) {
+        CHIMP_BUG ("module not found: %s", CHIMP_STR_DATA(name));
+        return NULL;
+    }
+    else {
+        CHIMP_BUG ("bad key in builtin_modules?");
+        return NULL;
+    }
 }
 
 ChimpRef *
@@ -154,5 +227,22 @@ chimp_module_add_local_str (
     }
 
     return chimp_module_add_local (self, nameref, value);
+}
+
+chimp_bool_t
+chimp_module_add_builtin (ChimpRef *module)
+{
+    if (builtin_modules == NULL) {
+        builtin_modules = chimp_hash_new ();
+        if (builtin_modules == NULL) {
+            return CHIMP_FALSE;
+        }
+        chimp_gc_make_root (NULL, builtin_modules);
+    }
+    if (!chimp_hash_put (
+            builtin_modules, CHIMP_MODULE_NAME(module), module)) {
+        return CHIMP_FALSE;
+    }
+    return CHIMP_TRUE;
 }
 

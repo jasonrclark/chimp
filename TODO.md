@@ -1,5 +1,9 @@
+# General
 * Fix broken examples.
 * Forward declarations.
+* Use CHIMP\_SUPER(self) to invoke super class slots for e.g. init, dtor, etc.
+* Allow (de)serialization of custom types to allow these objects to be sent
+  as messages between tasks where safe (e.g. net.socket).
 * Interesting note: because closures may capture parts of their execution
   environment & thus dependendent upon the state of the heap, it's
   rarely kosher to send closures to other tasks. (n.b. we can't send any
@@ -62,3 +66,8 @@ macro from C?) -- we *should* be doing this already.
 * Modules, code objects, builtins, etc. (read-only global data) probably
   belongs somewhere other than the 'main' task heap. Alternatively, don't
   bother spinning up a modules hash for non-main tasks.
+
+# Windows
+* Bison & Flex are a pain with MSVC under windows. Options: MinGW? Lemon?
+* Some CMake quirks under Windows, too.
+

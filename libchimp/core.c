@@ -74,6 +74,10 @@ ChimpRef *chimp_nil = NULL;
 ChimpRef *chimp_true = NULL;
 ChimpRef *chimp_false = NULL;
 ChimpRef *chimp_builtins = NULL;
+ChimpRef *chimp_module_path = NULL;
+
+static ChimpRef *
+_chimp_module_make_path (const char *path);
 
 /* XXX clean me up -- strndup is a GNU extension */
 static char *
@@ -135,6 +139,11 @@ chimp_str_cmp (ChimpRef *a, ChimpRef *b)
     else {
         return CHIMP_CMP_EQ;
     }
+}
+
+static void
+_chimp_object_mark (ChimpGC *gc, ChimpRef *self)
+{
 }
 
 static ChimpRef *
@@ -321,7 +330,7 @@ chimp_core_init_builtins (void)
 }
 
 chimp_bool_t
-chimp_core_startup (void *stack_start)
+chimp_core_startup (const char *path, void *stack_start)
 {
     main_task = chimp_task_new_main (stack_start);
     if (main_task == NULL) {
@@ -334,12 +343,14 @@ chimp_core_startup (void *stack_start)
 
     CHIMP_BOOTSTRAP_CLASS_L1(NULL, chimp_object_class, "object", NULL);
     CHIMP_CLASS(chimp_object_class)->str = _chimp_object_str;
+    CHIMP_CLASS(chimp_object_class)->mark = _chimp_object_mark;
     CHIMP_CLASS(chimp_object_class)->getattr = _chimp_object_getattr;
     CHIMP_BOOTSTRAP_CLASS_L1(NULL, chimp_class_class, "class", chimp_object_class);
     CHIMP_CLASS(chimp_class_class)->getattr = chimp_class_getattr;
     CHIMP_BOOTSTRAP_CLASS_L1(NULL, chimp_str_class, "str", chimp_object_class);
     CHIMP_CLASS(chimp_str_class)->cmp = chimp_str_cmp;
     CHIMP_CLASS(chimp_str_class)->str = chimp_str_str;
+    CHIMP_CLASS(chimp_str_class)->mark = _chimp_object_mark;
 
     CHIMP_BOOTSTRAP_CLASS_L2(NULL, chimp_object_class);
     CHIMP_BOOTSTRAP_CLASS_L2(NULL, chimp_class_class);
@@ -393,14 +404,31 @@ chimp_core_startup (void *stack_start)
     */
     if (!chimp_ast_class_bootstrap ()) goto error;
 
-    chimp_task_add_module (NULL, chimp_init_io_module ());
-    chimp_task_add_module (NULL, chimp_init_assert_module ());
-    chimp_task_add_module (NULL, chimp_init_unit_module ());
-    chimp_task_add_module (NULL, chimp_init_os_module ());
-    chimp_task_add_module (NULL, chimp_init_gc_module ());
-    chimp_task_add_module (NULL, chimp_init_net_module ());
+    if (!chimp_module_add_builtin (chimp_init_io_module ()))
+        goto error;
+
+    if (!chimp_module_add_builtin (chimp_init_assert_module ()))
+        goto error;
+
+    if (!chimp_module_add_builtin (chimp_init_unit_module ()))
+        goto error;
+
+    if (!chimp_module_add_builtin (chimp_init_os_module ()))
+        goto error;
+
+    if (!chimp_module_add_builtin (chimp_init_gc_module ()))
+        goto error;
+
+    if (!chimp_module_add_builtin (chimp_init_net_module ()))
+        goto error;
 
     if (!chimp_core_init_builtins ()) goto error;
+
+    chimp_module_path = _chimp_module_make_path (path);
+    if (chimp_module_path == NULL)
+        goto error;
+    if (!chimp_gc_make_root (NULL, chimp_module_path))
+        goto error;
 
     if (!chimp_task_main_ready ()) goto error;
 
@@ -459,4 +487,49 @@ chimp_is_builtin (ChimpRef *name)
         return CHIMP_TRUE;
     }
 }
+
+static ChimpRef *
+_chimp_module_make_path (const char *path)
+{
+    size_t i, j;
+    size_t len;
+    ChimpRef *result = chimp_array_new ();
+    
+    if (path == NULL) {
+        /* TODO generate default path */
+        return result;
+    }
+
+    len = strlen (path);
+
+    /* XXX this works, but this is totally crap */
+    for (i = j = 0; i < len; j++) {
+        if (path[j] == ':' || path[j] == '\0') {
+            char *s;
+            size_t l;
+            ChimpRef *entry;
+
+            l = j - i;
+            if (l == 0) continue;
+
+            s = strndup (path + i, l);
+            if (s == NULL) {
+                return NULL;
+            }
+
+            entry = chimp_str_new_take (s, l);
+            if (entry == NULL) {
+                free (s);
+                return NULL;
+            }
+            if (!chimp_array_push (result, entry)) {
+                return NULL;
+            }
+            i = j + 1;
+        }
+    }
+
+    return result;
+}
+
 

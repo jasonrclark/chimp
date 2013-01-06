@@ -27,6 +27,28 @@
 #include "chimp/array.h"
 #include "chimp/str.h"
 
+#define CHIMP_MODULE_INT_CONSTANT(mod, name, value) \
+    do { \
+        ChimpRef *temp = chimp_int_new (value); \
+        if (temp == NULL) { \
+            return NULL; \
+        } \
+        if (!chimp_module_add_local_str ((mod), (name), temp)) { \
+            return NULL; \
+        } \
+    } while (0)
+
+#define CHIMP_MODULE_ADD_CLASS(mod, name, klass) \
+    do { \
+        if ((klass) == NULL) { \
+            return NULL; \
+        } \
+        \
+        if (!chimp_module_add_local_str ((mod), (name), (klass))) { \
+            return NULL; \
+        } \
+    } while (0)
+
 typedef struct _ChimpNetSocket {
     ChimpAny base;
     int fd;
@@ -111,6 +133,22 @@ _chimp_socket_listen (ChimpRef *self, ChimpRef *args)
 }
 
 static ChimpRef *
+_chimp_socket_setsockopt (ChimpRef *self, ChimpRef *args)
+{
+    int32_t level, optname, optval;
+
+    if (!chimp_method_parse_args (args, "iii", &level, &optname, &optval)) {
+        return NULL;
+    }
+
+    if (setsockopt (CHIMP_NET_SOCKET(self)->fd, level, optname, &optval, sizeof(optval)) != 0) {
+        return chimp_false;
+    }
+
+    return chimp_true;
+}
+
+static ChimpRef *
 _chimp_socket_accept (ChimpRef *self, ChimpRef *args)
 {
     int fd = CHIMP_NET_SOCKET(self)->fd;
@@ -142,6 +180,68 @@ _chimp_socket_close (ChimpRef *self, ChimpRef *args)
     return chimp_nil;
 }
 
+static ChimpRef *
+_chimp_socket_shutdown (ChimpRef *self, ChimpRef *args)
+{
+    int32_t how = SHUT_RDWR;
+
+    if (!chimp_method_parse_args (args, "i", &how)) {
+        return NULL;
+    }
+
+    if (shutdown (CHIMP_NET_SOCKET (self)->fd, how) != 0) {
+        return chimp_false;
+    }
+    return chimp_true;
+}
+
+static ChimpRef *
+_chimp_socket_recv (ChimpRef *self, ChimpRef *args)
+{
+    int32_t size;
+    char *buf;
+    int n;
+
+    if (!chimp_method_parse_args (args, "i", &size)) {
+        return NULL;
+    }
+
+    buf = malloc (size + 1);
+    if (buf == NULL) {
+        CHIMP_BUG ("Failed to allocate recv buffer");
+        return NULL;
+    }
+
+    n = recv (CHIMP_NET_SOCKET (self)->fd, buf, size, 0);
+    if (n <= 0) {
+        return CHIMP_STR_NEW ("");
+    }
+
+    if (n < size) {
+        char *temp = realloc (buf, n + 1);
+        if (temp == NULL) {
+            CHIMP_BUG ("Failed to shrink recv buffer");
+            return NULL;
+        }
+        buf = temp;
+    }
+    buf[n] = '\0';
+
+    return chimp_str_new_take (buf, n);
+}
+
+static ChimpRef *
+_chimp_socket_getattr (ChimpRef *self, ChimpRef *attr)
+{
+    if (strcmp ("fd", CHIMP_STR_DATA(attr)) == 0) {
+        return chimp_int_new (CHIMP_NET_SOCKET (self)->fd);
+    }
+    else {
+        ChimpRef *super = CHIMP_CLASS_SUPER(CHIMP_ANY_CLASS(self));
+        return CHIMP_CLASS(super)->getattr (self, attr);
+    }
+}
+
 static void
 _chimp_socket_dtor (ChimpRef *self)
 {
@@ -152,31 +252,52 @@ static chimp_bool_t
 _chimp_socket_class_bootstrap (void)
 {
     if (chimp_net_socket_class == NULL) {
+        ChimpRef *net_socket_class;
         chimp_net_socket_class = chimp_class_new (
             CHIMP_STR_NEW("net.socket"), NULL, sizeof(ChimpNetSocket));
         if (chimp_net_socket_class == NULL) {
             return CHIMP_FALSE;
         }
-        CHIMP_CLASS(chimp_net_socket_class)->init = _chimp_socket_init;
-        CHIMP_CLASS(chimp_net_socket_class)->dtor = _chimp_socket_dtor;
+
+        /* protect net.socket from the GC */
+        net_socket_class = chimp_net_socket_class;
+
+        CHIMP_CLASS(net_socket_class)->init = _chimp_socket_init;
+        CHIMP_CLASS(net_socket_class)->dtor = _chimp_socket_dtor;
+        CHIMP_CLASS(net_socket_class)->getattr = _chimp_socket_getattr;
 
         if (!chimp_class_add_native_method (
-                chimp_net_socket_class, "close", _chimp_socket_close)) {
+                net_socket_class, "close", _chimp_socket_close)) {
             return CHIMP_FALSE;
         }
 
         if (!chimp_class_add_native_method (
-                chimp_net_socket_class, "bind", _chimp_socket_bind)) {
+                net_socket_class, "bind", _chimp_socket_bind)) {
             return CHIMP_FALSE;
         }
 
         if (!chimp_class_add_native_method (
-                chimp_net_socket_class, "listen", _chimp_socket_listen)) {
+                net_socket_class, "setsockopt", _chimp_socket_setsockopt)) {
             return CHIMP_FALSE;
         }
 
         if (!chimp_class_add_native_method (
-                chimp_net_socket_class, "accept", _chimp_socket_accept)) {
+                net_socket_class, "listen", _chimp_socket_listen)) {
+            return CHIMP_FALSE;
+        }
+
+        if (!chimp_class_add_native_method (
+                net_socket_class, "accept", _chimp_socket_accept)) {
+            return CHIMP_FALSE;
+        }
+
+        if (!chimp_class_add_native_method (
+                net_socket_class, "recv", _chimp_socket_recv)) {
+            return CHIMP_FALSE;
+        }
+
+        if (!chimp_class_add_native_method (
+                net_socket_class, "shutdown", _chimp_socket_shutdown)) {
             return CHIMP_FALSE;
         }
     }
@@ -187,44 +308,31 @@ ChimpRef *
 chimp_init_net_module (void)
 {
     ChimpRef *net;
-    ChimpRef *temp;
+    ChimpRef *net_socket;
 
     net = chimp_module_new_str ("net", NULL);
     if (net == NULL) {
         return NULL;
     }
 
-    temp = chimp_int_new (AF_INET);
-    if (temp == NULL) {
-        return NULL;
-    }
-    if (!chimp_module_add_local_str (net, "AF_INET", temp)) {
-        return NULL;
-    }
-
-    temp = chimp_int_new (SOCK_DGRAM);
-    if (temp == NULL) {
-        return NULL;
-    }
-    if (!chimp_module_add_local_str (net, "SOCK_DGRAM", temp)) {
-        return NULL;
-    }
-
-    temp = chimp_int_new (SOCK_STREAM);
-    if (temp == NULL) {
-        return NULL;
-    }
-    if (!chimp_module_add_local_str (net, "SOCK_STREAM", temp)) {
-        return NULL;
-    }
+    CHIMP_MODULE_INT_CONSTANT(net, "AF_INET", AF_INET);
+    CHIMP_MODULE_INT_CONSTANT(net, "SOCK_DGRAM", SOCK_DGRAM);
+    CHIMP_MODULE_INT_CONSTANT(net, "SOCK_STREAM", SOCK_STREAM);
+    CHIMP_MODULE_INT_CONSTANT(net, "SOL_SOCKET", SOL_SOCKET);
+    CHIMP_MODULE_INT_CONSTANT(net, "SO_REUSEADDR", SO_REUSEADDR);
+    CHIMP_MODULE_INT_CONSTANT(net, "SHUT_RD", SHUT_RD);
+    CHIMP_MODULE_INT_CONSTANT(net, "SHUT_WR", SHUT_WR);
+    /* XXX adding this seems to trigger a GC bug */
+    CHIMP_MODULE_INT_CONSTANT(net, "SHUT_RDWR", SHUT_RDWR);
 
     if (!_chimp_socket_class_bootstrap ()) {
         return NULL;
     }
 
-    if (!chimp_module_add_local_str (net, "socket", chimp_net_socket_class)) {
-        return NULL;
-    }
+    /* protect net.socket from the garbage collector */
+    net_socket = chimp_net_socket_class;
+
+    CHIMP_MODULE_ADD_CLASS(net, "socket", net_socket);
 
     return net;
 }
